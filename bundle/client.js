@@ -563,7 +563,9 @@ window.__ModuleLoader__.load({
                 title: isCurrent ? name : `${t('section.switch')}: ${name}`,
                 onClick: () => {
                   if (isCurrent || busy !== '') return
-                  void run('checkout', 'checkout', { branch: name }, () => t('feedback.switched', { branch: name }))
+                  void run('checkout', 'checkout', { branch: name, source: kind }, (value) =>
+                    t('feedback.switched', { branch: value.branch || name }),
+                  )
                 },
               },
               h('span', { className: 'gbb-row-mark' }, isCurrent ? icons.check(13) : null),

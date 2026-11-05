@@ -230,7 +230,32 @@ export function apply(ctx, config) {
     if (!checked.ok) {
       return { failure: failure('git/bad-branch', textOf(checked) || 'Invalid branch name', { branch: name }) }
     }
-    return { name }
+    const source = request?.source === 'remote' || request?.source === 'local' ? request.source : 'auto'
+    return { name, source }
+  }
+
+  async function hasRef(root, ref) {
+    const result = await git(root, ['show-ref', '--verify', '--quiet', ref], { timeout: 5_000 })
+    return result.ok
+  }
+
+  /** Switch to a local branch without allowing a remote-tracking ref to detach HEAD. */
+  async function switchToLocal(root, name) {
+    let result = await git(root, ['switch', name])
+    if (!result.ok) result = await git(root, ['checkout', name])
+    if (!result.ok) return result
+    const current = await git(root, ['branch', '--show-current'], { timeout: 5_000 })
+    const actual = current.ok ? current.stdout.trim() : ''
+    if (actual === '') {
+      return {
+        ok: false,
+        code: -1,
+        timedOut: false,
+        stdout: result.stdout,
+        stderr: 'Git switched to a detached HEAD instead of a local branch',
+      }
+    }
+    return { ...result, branch: actual }
   }
 
   /** Read one `git status --porcelain=v1 -b` report. */
@@ -342,15 +367,59 @@ export function apply(ctx, config) {
     const branch = await readBranchName(location.root, request)
     if (branch.failure !== undefined) return branch.failure
     const name = branch.name
-    let result = await git(location.root, ['switch', name])
-    if (!result.ok) result = await git(location.root, ['checkout', name])
-    if (result.ok) return success({ branch: name, output: (result.stdout + result.stderr).trim() })
-    const local = name.includes('/') ? name.slice(name.indexOf('/') + 1) : ''
-    if (local !== '') {
-      const tracked = await git(location.root, ['switch', '-c', local, '--track', name])
-      if (tracked.ok) return success({ branch: local, output: (tracked.stdout + tracked.stderr).trim() })
+
+    const localRef = `refs/heads/${name}`
+    const remoteRef = `refs/remotes/${name}`
+    const [isLocal, isRemote] = await Promise.all([
+      branch.source === 'remote' ? false : hasRef(location.root, localRef),
+      branch.source === 'local' ? false : hasRef(location.root, remoteRef),
+    ])
+
+    if (isLocal) {
+      const switched = await switchToLocal(location.root, name)
+      if (switched.ok) {
+        return success({ branch: switched.branch, output: (switched.stdout + switched.stderr).trim() })
+      }
+      return failure('git/checkout-failed', textOf(switched), { branch: name, cwd: location.root })
     }
-    return failure('git/checkout-failed', textOf(result), { branch: name, cwd: location.root })
+
+    if (!isRemote) {
+      return failure('git/branch-not-found', `Branch not found: ${name}`, { branch: name, cwd: location.root })
+    }
+
+    const slash = name.indexOf('/')
+    const local = slash > 0 ? name.slice(slash + 1) : ''
+    if (local === '') {
+      return failure('git/bad-remote-branch', `Cannot derive a local branch from ${name}`, { branch: name })
+    }
+    const localCheck = await git(location.root, ['check-ref-format', '--branch', local])
+    if (!localCheck.ok) {
+      return failure('git/bad-branch', textOf(localCheck) || 'Invalid local branch name', { branch: name, local })
+    }
+
+    if (await hasRef(location.root, `refs/heads/${local}`)) {
+      const switched = await switchToLocal(location.root, local)
+      if (switched.ok) {
+        return success({ branch: switched.branch, output: (switched.stdout + switched.stderr).trim() })
+      }
+      return failure('git/checkout-failed', textOf(switched), { branch: local, remote: name, cwd: location.root })
+    }
+
+    let tracked = await git(location.root, ['switch', '-c', local, '--track', name])
+    if (!tracked.ok) tracked = await git(location.root, ['checkout', '-b', local, '--track', name])
+    if (tracked.ok) {
+      const current = await git(location.root, ['branch', '--show-current'], { timeout: 5_000 })
+      const actual = current.ok ? current.stdout.trim() : ''
+      if (actual === local) {
+        return success({ branch: local, remote: name, output: (tracked.stdout + tracked.stderr).trim() })
+      }
+      return failure('git/detached-head', 'Git created a detached HEAD instead of a local branch', {
+        branch: local,
+        remote: name,
+        cwd: location.root,
+      })
+    }
+    return failure('git/checkout-failed', textOf(tracked), { branch: local, remote: name, cwd: location.root })
   }
 
   /** Merge one branch (local or remote-tracking) into the branch currently checked out. */
