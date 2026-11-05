@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Git branch bar">
+  <rect x="0" y="0" width="64" height="64" rx="14" fill="#1f6feb"/>
+  <g fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="21" cy="18" r="6"/>
+    <circle cx="21" cy="46" r="6"/>
+    <circle cx="44" cy="18" r="6"/>
+    <path d="M21 24v16"/>
+    <path d="M44 24v5.5A10.5 10.5 0 0 1 33.5 40H21"/>
+  </g>
+</svg>

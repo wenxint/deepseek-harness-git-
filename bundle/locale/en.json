@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Git Branch Badge",
+    "description": "Shows the branch of the open project in the bottom-right corner, with branch switching and merging."
+  }
+}

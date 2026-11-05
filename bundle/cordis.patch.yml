@@ -1,0 +1,6 @@
+- insert:
+    - id: git-branch-bar
+      name: '@local/dsh-plugin-git-branch'
+      # Both are read directly by this Context: `connection` authenticates the
+      # route, `webServer` is the carrier it registers on.
+      inject: [connection, webServer]
