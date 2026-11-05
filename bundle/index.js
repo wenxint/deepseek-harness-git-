@@ -465,7 +465,47 @@ export function apply(ctx, config) {
     return success({ output: (result.stdout + result.stderr).trim() })
   }
 
-  const handlers = { status: readStatus, branches: readBranches, checkout, merge, mergeAbort }
+  /** Fast-forward the current branch from its configured upstream. */
+  async function sync(request) {
+    const location = await resolveRepository(request)
+    if (location.failure !== undefined) return location.failure
+    if (location.root === undefined) {
+      return failure('git/not-a-repository', 'The selected directory is not inside a Git repository', {
+        cwd: location.cwd,
+      })
+    }
+
+    const current = await git(location.root, ['branch', '--show-current'], { timeout: 5_000 })
+    const branch = current.ok ? current.stdout.trim() : ''
+    if (branch === '') {
+      return failure('git/detached-head', 'Cannot sync while HEAD is detached', { cwd: location.root })
+    }
+
+    const upstream = await git(location.root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'])
+    const upstreamName = upstream.ok ? upstream.stdout.trim() : ''
+    if (upstreamName === '') {
+      return failure('git/no-upstream', `The current branch has no upstream: ${branch}`, {
+        branch,
+        cwd: location.root,
+      })
+    }
+
+    const pulled = await git(location.root, ['pull', '--ff-only', '--no-rebase'], {
+      timeout: NETWORK_TIMEOUT_MS,
+    })
+    const output = (pulled.stdout + pulled.stderr).trim()
+    if (pulled.ok) return success({ branch, upstream: upstreamName, output })
+
+    const diverged = /not possible to fast-forward|divergent branches|need to specify how to reconcile/i.test(output)
+    return failure(diverged ? 'git/sync-diverged' : 'git/sync-failed', textOf(pulled), {
+      branch,
+      upstream: upstreamName,
+      cwd: location.root,
+      diverged,
+    })
+  }
+
+  const handlers = { status: readStatus, branches: readBranches, checkout, merge, mergeAbort, sync }
 
   /** Dispatch one endpoint; every outcome is a value, never a rejection. */
   async function dispatch(endpoint, payload) {

@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
       'chip.error': '分支读取失败',
       'chip.noSession': '未打开项目',
       'panel.title': 'Git 分支',
-      'panel.refresh': '刷新',
+      'panel.sync': '同步远程代码',
       'panel.close': '关闭',
       'panel.detached': '分离头指针',
       'panel.loading': '读取中…',
@@ -51,8 +51,13 @@ window.__ModuleLoader__.load({
       'branch.filterEmpty': '没有匹配的分支',
       'feedback.merged': '已把 {branch} 合并到 {current}',
       'feedback.switched': '已切换到 {branch}',
+      'feedback.synced': '已同步 {branch}（{upstream}）',
       'feedback.abort': '撤销合并',
       'feedback.failed': '操作失败',
+      'error.detachedHead': '当前处于分离头指针，无法同步远程代码。',
+      'error.noUpstream': '当前分支没有设置远程跟踪分支，无法同步。',
+      'error.syncDiverged': '本地分支与远程已经分叉，请先手动合并或变基。',
+      'error.syncFailed': '同步远程代码失败，请检查网络或 Git 凭据。',
       'error.mergeConflict': '合并产生冲突，请解决冲突或撤销合并。',
       'panel.notRepo': '当前目录不在 Git 仓库中，因此读不到分支。',
       'panel.readError': '无法读取当前项目的 Git 状态。',
@@ -68,7 +73,7 @@ window.__ModuleLoader__.load({
       'chip.error': 'Could not read branch',
       'chip.noSession': 'No project open',
       'panel.title': 'Git branch',
-      'panel.refresh': 'Refresh',
+      'panel.sync': 'Sync remote changes',
       'panel.close': 'Close',
       'panel.detached': 'Detached HEAD',
       'panel.loading': 'Loading…',
@@ -91,8 +96,13 @@ window.__ModuleLoader__.load({
       'branch.filterEmpty': 'No matching branches',
       'feedback.merged': 'Merged {branch} into {current}',
       'feedback.switched': 'Switched to {branch}',
+      'feedback.synced': 'Synced {branch} from {upstream}',
       'feedback.abort': 'Abort merge',
       'feedback.failed': 'Action failed',
+      'error.detachedHead': 'Cannot sync remote changes while HEAD is detached.',
+      'error.noUpstream': 'The current branch has no upstream configured, so it cannot be synced.',
+      'error.syncDiverged': 'This branch has diverged from its upstream. Merge or rebase it manually first.',
+      'error.syncFailed': 'Could not sync remote changes. Check the network and Git credentials.',
       'error.mergeConflict': 'The merge has conflicts. Resolve them or abort the merge.',
       'panel.notRepo': 'This directory is not inside a Git repository, so no branch is available.',
       'panel.readError': 'The Git state for this project could not be read.',
@@ -211,6 +221,12 @@ window.__ModuleLoader__.load({
       },
       refresh(size) {
         return svg(size ?? 13, h('path', { d: 'M13.2 8a5.2 5.2 0 1 1-1.7-3.85M13.4 2.6v2.9h-2.9', ...stroke }))
+      },
+      pull(size) {
+        return svg(size ?? 13, [
+          h('path', { key: 'a', d: 'M8 2.5v7M5 6.5 8 9.5l3-3', ...stroke }),
+          h('path', { key: 'b', d: 'M3 12.5h10', ...stroke }),
+        ])
       },
       search(size) {
         return svg(size ?? 13, [
@@ -460,7 +476,18 @@ window.__ModuleLoader__.load({
               setFeedback({ kind: 'error', text: `${t('error.mergeConflict')}\n${result.error.message}` })
               await refresh()
             } else {
-              setFeedback({ kind: 'error', text: result.error?.message || t('feedback.failed') })
+              const error = result.error
+              const translated =
+                error?.code === 'git/detached-head'
+                  ? t('error.detachedHead')
+                  : error?.code === 'git/no-upstream'
+                    ? t('error.noUpstream')
+                    : error?.code === 'git/sync-diverged'
+                      ? t('error.syncDiverged')
+                      : error?.code === 'git/sync-failed'
+                        ? t('error.syncFailed')
+                        : ''
+              setFeedback({ kind: 'error', text: translated || error?.message || t('feedback.failed') })
             }
           } catch (failure) {
             setFeedback({ kind: 'error', text: failure instanceof Error ? failure.message : String(failure) })
@@ -744,15 +771,15 @@ window.__ModuleLoader__.load({
               {
                 type: 'button',
                 className: 'gbb-icon-btn',
-                title: t('panel.refresh'),
-                'aria-label': t('panel.refresh'),
+                title: t('panel.sync'),
+                'aria-label': t('panel.sync'),
                 disabled: busy !== '' || sessionId === '',
-                onClick: () => {
-                  void refresh()
-                  void loadBranches()
-                },
+                onClick: () =>
+                  void run('sync', 'sync', {}, (value) =>
+                    t('feedback.synced', { branch: value.branch, upstream: value.upstream }),
+                  ),
               },
-              h('span', { className: busy === '' ? undefined : 'gbb-spin' }, icons.refresh(13)),
+              h('span', { className: busy === 'sync' ? 'gbb-spin' : undefined }, icons.pull(13)),
             ),
             h(
               'button',
