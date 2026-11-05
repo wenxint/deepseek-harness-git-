@@ -334,7 +334,7 @@ export function apply(ctx, config) {
     const listed = await git(location.root, [
       'for-each-ref',
       '--sort=-committerdate',
-      '--format=%(refname)%09%(refname:short)',
+      '--format=%(refname)%09%(refname:short)%09%(upstream:short)%09%(upstream:track)',
       'refs/heads',
       'refs/remotes',
     ])
@@ -342,17 +342,28 @@ export function apply(ctx, config) {
       return failure('git/branches-failed', textOf(listed) || 'git for-each-ref failed', { cwd: location.root })
     }
     const local = []
+    const localTracking = {}
     const remote = []
     for (const line of listed.stdout.split('\n')) {
       if (line === '') continue
-      const tab = line.indexOf('\t')
-      if (tab < 0) continue
-      const ref = line.slice(0, tab)
-      const short = line.slice(tab + 1)
-      if (ref.startsWith('refs/heads/')) local.push(short)
-      else if (ref.startsWith('refs/remotes/') && !short.endsWith('/HEAD')) remote.push(short)
+      const fields = line.split('\t')
+      if (fields.length < 4) continue
+      const [ref, short, upstream, track] = fields
+      if (ref.startsWith('refs/heads/')) {
+        local.push(short)
+        if (upstream !== '') {
+          const ahead = /ahead (\d+)/.exec(track)
+          const behind = /behind (\d+)/.exec(track)
+          localTracking[short] = {
+            upstream,
+            ahead: ahead === null ? 0 : Number(ahead[1]),
+            behind: behind === null ? 0 : Number(behind[1]),
+            gone: /\bgone\b/i.test(track),
+          }
+        }
+      } else if (ref.startsWith('refs/remotes/') && !short.endsWith('/HEAD')) remote.push(short)
     }
-    return success({ local, remote })
+    return success({ local, localTracking, remote })
   }
 
   /** Switch to a local branch, or create a tracking branch for a remote ref. */

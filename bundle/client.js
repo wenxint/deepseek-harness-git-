@@ -42,6 +42,8 @@ window.__ModuleLoader__.load({
       'repo.more': '只显示前 {count} 个仓库',
       'branch.local': '本地分支',
       'branch.remote': '远程分支',
+      'branch.relativeTo': '相对 {upstream}',
+      'branch.upstreamGone': '上游失效',
       'branch.merge': '合并',
       'branch.merging': '合并中…',
       'branch.empty': '没有可用的分支',
@@ -87,6 +89,8 @@ window.__ModuleLoader__.load({
       'repo.more': 'Only the first {count} repositories are shown',
       'branch.local': 'Local',
       'branch.remote': 'Remote',
+      'branch.relativeTo': 'Relative to {upstream}',
+      'branch.upstreamGone': 'Upstream missing',
       'branch.merge': 'Merge',
       'branch.merging': 'Merging…',
       'branch.empty': 'No branches available',
@@ -158,6 +162,13 @@ window.__ModuleLoader__.load({
       '.gbb-row-mark{display:grid;place-items:center;flex:none;width:13px;color:var(--dsw-alias-state-success-primary)}',
       '.gbb-row-mark svg{width:13px;height:13px}',
       '.gbb-row-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.gbb-row-stats{display:inline-flex;align-items:center;justify-content:flex-end;gap:5px;flex:none;min-width:42px;color:var(--dsw-alias-label-tertiary);font-size:10px;line-height:16px;font-variant-numeric:tabular-nums}',
+      '.gbb-row-stat{display:inline-flex;align-items:center;gap:1px;white-space:nowrap}',
+      '.gbb-row-stat svg{width:9px;height:9px}',
+      '.gbb-row-stat-zero{opacity:.55}',
+      '.gbb-row-upstream-gone{color:var(--dsw-alias-state-warn-primary);font-size:10px;white-space:nowrap}',
+      '.gbb-row-action{display:flex;align-items:center;justify-content:flex-end;flex:none;width:52px}',
+      '.gbb-row-action .gbb-mini{box-sizing:border-box;max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.gbb-row-remote .gbb-row-label{color:var(--dsw-alias-label-secondary)}',
       '.gbb-row-current .gbb-row-label{color:var(--dsw-alias-label-primary);font-weight:500}',
       '.gbb-repo-row{display:flex;align-items:center;gap:8px;width:calc(100% - 24px);box-sizing:border-box;margin:1px 12px;padding:6px 8px;border:none;border-radius:var(--dsw-radius-sm);background:0 0;color:var(--dsw-alias-label-primary);font:inherit;text-align:left;cursor:pointer}',
@@ -532,6 +543,10 @@ window.__ModuleLoader__.load({
         const dirty = Number(status?.changeCount) || 0
         const allLocal = branches === null || !Array.isArray(branches.local) ? [] : branches.local
         const allRemote = branches === null || !Array.isArray(branches.remote) ? [] : branches.remote
+        const localTracking =
+          branches === null || branches.localTracking === null || typeof branches.localTracking !== 'object'
+            ? {}
+            : branches.localTracking
         const normalizedFilter = branchFilter.trim().toLocaleLowerCase()
         const matchesFilter = (name) =>
           normalizedFilter === '' || String(name).toLocaleLowerCase().includes(normalizedFilter)
@@ -575,6 +590,49 @@ window.__ModuleLoader__.load({
         const branchRow = (name, kind) => {
           const isCurrent = !status.detached && name === branch
           const key = `${kind}:${name}`
+          const tracking = kind === 'local' ? localTracking[name] : undefined
+          const rowAhead = Number(tracking?.ahead) || 0
+          const rowBehind = Number(tracking?.behind) || 0
+          const trackingLabel =
+            tracking === undefined
+              ? null
+              : tracking.gone
+                ? h(
+                    'span',
+                    {
+                      className: 'gbb-row-stats gbb-row-upstream-gone',
+                      title: t('branch.upstreamGone'),
+                    },
+                    t('branch.upstreamGone'),
+                  )
+                : h(
+                    'span',
+                    {
+                      className: 'gbb-row-stats',
+                      title: t('branch.relativeTo', { upstream: tracking.upstream }),
+                      'aria-label': `${t('chip.behind', { count: rowBehind })}, ${t('chip.ahead', {
+                        count: rowAhead,
+                      })}. ${t('branch.relativeTo', { upstream: tracking.upstream })}`,
+                    },
+                    h(
+                      'span',
+                      {
+                        className: `gbb-row-stat${rowBehind === 0 ? ' gbb-row-stat-zero' : ''}`,
+                        title: t('chip.behind', { count: rowBehind }),
+                      },
+                      String(rowBehind),
+                      icons.down(9),
+                    ),
+                    h(
+                      'span',
+                      {
+                        className: `gbb-row-stat${rowAhead === 0 ? ' gbb-row-stat-zero' : ''}`,
+                        title: t('chip.ahead', { count: rowAhead }),
+                      },
+                      String(rowAhead),
+                      icons.up(9),
+                    ),
+                  )
           return h(
             'div',
             {
@@ -598,22 +656,27 @@ window.__ModuleLoader__.load({
               h('span', { className: 'gbb-row-mark' }, isCurrent ? icons.check(13) : null),
               h('span', { className: 'gbb-row-label' }, name),
             ),
+            trackingLabel,
             isCurrent
-              ? null
+              ? h('span', { className: 'gbb-row-action', 'aria-hidden': 'true' })
               : h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'gbb-mini',
-                    disabled: busy !== '',
-                    title: t('section.merge'),
-                    onClick: () => {
-                      void run('merge', 'merge', { branch: name }, () =>
-                        t('feedback.merged', { branch: name, current: currentName }),
-                      )
+                  'span',
+                  { className: 'gbb-row-action' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'gbb-mini',
+                      disabled: busy !== '',
+                      title: t('section.merge'),
+                      onClick: () => {
+                        void run('merge', 'merge', { branch: name }, () =>
+                          t('feedback.merged', { branch: name, current: currentName }),
+                        )
+                      },
                     },
-                  },
-                  busy === 'merge' ? t('branch.merging') : t('branch.merge'),
+                    busy === 'merge' ? t('branch.merging') : t('branch.merge'),
+                  ),
                 ),
           )
         }
